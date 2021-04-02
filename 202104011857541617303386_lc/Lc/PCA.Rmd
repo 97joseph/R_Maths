@@ -1,0 +1,109 @@
+---
+title: "PCA examples"
+author: "Chris McKennan"
+date: "4/9/2020"
+output: html_document
+---
+
+Some simulation examples to understand PCA
+
+#Simulate Data
+
+```{r SimulationParameters}
+p <- 10^4
+n <- 10^2
+K <- 10
+#Lambda <- rep(1, length=K)   #Eigenvalues, all of which are large
+Lambda <- exp(seq(log(1),log(0.5/n),length=K))   #Eigenvalues, some of which are small
+```
+
+```{r SimulatedData}
+SimData <- function(p, n, Lambda) {
+  out <- list()
+  K <- length(Lambda)
+  out$C <- matrix(rnorm(n*K), nrow=n, ncol=K)
+  out$L <- matrix(NA,nrow=p,ncol=K)
+  for (k in 1:K) {
+    out$L[,k] <- rnorm(p)*sqrt(Lambda[k])
+  }
+  mu <- t(scale(x = t(out$L%*%t(out$C)),center = T, scale = F))
+  out$C.true <- sqrt(n)*svd(mu)$v[,1:K]
+  out$Y <- out$L%*%t(out$C) + matrix(rnorm(n*p),nrow=p,ncol=n)
+  out$C.stand <- scale(x = out$C, center = T, scale = F)
+  return(out)
+}
+
+out.sim <- SimData(p,n,Lambda)
+```
+
+#Analyze data
+```{r AnalyzeData}
+svd.sim <- svd(t( scale(x = t(out.sim$Y), center = T, scale = F) ), nu = K, nv = K)   #Assume K is known
+C.hat <- sqrt(n)*svd.sim$v[,1:K]
+sapply(X = 1:K, function(k){ abs(cor(C.hat[,k],out.sim$C.true[,k])) })  #Correlation between individual vectors
+
+#Correlation between subspaces#
+cos.theta <- svd(t(svd(C.hat)$u)%*%svd(out.sim$C)$u)$d[K]
+```
+
+#Choosing K with a scree plot in simulated data
+```{r ScreePlot_SimulatedData}
+#From simulated data#
+Y.sim <- t(scale(t(out.sim$Y),center = T, scale = F))   #mean-center the rows of Y
+eigs <- eigen(1/p*t(Y.sim)%*%Y.sim)$values
+plot(eigs/sum(eigs), xlab="Eigenvalue index", ylab="% variance explained")
+points(K, eigs[K]/sum(eigs), pch=4, col="red")
+lines(1:ncol(out.sim$Y),eigs/sum(eigs))
+legend("topright", pch=4, col="red", legend="True K=10")
+```
+
+#Choosing K with a scree plot in real data
+Real gene expression data
+Expression of $p=12,317$ genes in $n=217$ samples.
+These data cannot be shared...See slides for the scree plot output.
+```{r ScreePlot_RealData}
+eigs.real <- eigen(1/nrow(Y.real)*t(Y.real)%*%Y.real)$values
+plot(eigs.real/sum(eigs.real), xlab="Eigenvalue index", ylab="% variance explained", main="Real gene expression data")
+lines(1:ncol(Y.real),eigs.real/sum(eigs.real))
+```
+
+#Choosing K with Bai and Ng
+```{r BaiNg}
+Bai.Ng.K <- function(Y, K.max=NULL, Cov=NULL) {
+  if (!is.null(Cov)) {
+    Y <- Y%*%Compute.Q(Cov)
+  }
+  n <- ncol(Y)
+  p <- nrow(Y)
+  if (is.null(K.max)) {3/4*ncol(Y)}
+  svd.Y <- svd(x = Y)$d^2
+  out.log <- unlist(lapply(X = 0:(K.max-1), function(k){ log(sum(svd.Y[(k+1):n])/(n*p)) })) + (1:K.max)*(n+p)/(n*p)*log((n*p)/(n+p))
+  out.reg <- unlist(lapply(X = 0:(K.max-1), function(k){ sum(svd.Y[(k+1):n])/(n*p) })) + (1:K.max)*(n+p)/(n*p)*log((n*p)/(n+p))
+  return(list(obj.reg=out.reg, obj.log=out.log, K.hat.log=which.min(out.log), K.hat.reg=which.min(out.reg)))
+}
+
+out.BaiNg <- Bai.Ng.K(Y = out.sim$Y, K.max = 30, Cov=rep(1,ncol(out.sim$Y)))
+out.BaiNg$K.hat.reg   #R(k) is defined on the slides, P(n,p) = (n+p)/(n*p)*log((n*p)/(n+p))
+out.BaiNg$K.hat.log   #R(k) is defined as the log(expression on slides), P(n,p) is the same.
+```
+Even in idealized settings, Bai & Ng (2002) fails when some of the eigenvalues are small
+
+#Parallel analysis
+```{r ParallelAnalysis}
+DistnE <- function(Y, Cov=NULL, B=20) {
+  if (!is.null(Cov)) {Y <- Y%*%Compute.Q(Cov)}
+  n <- ncol(Y); p <- nrow(Y)
+  out  <- matrix(NA, nrow=20, ncol=B)
+  for (b in 1:B) {
+    E.tilde <- t(apply(X = Y, MARGIN = 1, function(y){y[order(runif(length(y)))]}))
+    out[,b] <- svd(E.tilde, nu = 20, nv = 20)$d[1:20]
+  }
+  return(out)
+}
+
+out.distE <- DistnE(out.sim$Y)
+svd.y <- svd(out.sim$Y)
+k <- 8
+hist(out.distE[k,], main=paste0("k = ",k), xlab="Singular values of E.tilde", xlim=c(min(c(out.distE[k,],svd.y$d[k])),max(c(out.distE[k,],svd.y$d[k]))))
+abline(v=svd.y$d[k],col="red")
+```

@@ -1,0 +1,81 @@
+---
+title: "ANOVA, etc"
+author: "Chris McKennan"
+date: "2/18/2020"
+output: html_document
+---
+
+#Power study
+```{r Power_Cereal}
+n.levels <- 4  #Number of cereal box designs
+stand.effect <- 5.5^2/2/3.5^2    #sum((mu_i - mu)^2)/sigma^2
+alpha <- 0.05   #significance level
+desired.power <- 0.9
+
+n.try <- n.levels*(2:20)
+power <- rep(NA, length(n.try))
+for (i in 1:length(power)) {
+  lambda.i <- n.try[i]/n.levels*stand.effect
+  power[i] <- pf(q = qf(p = 1-alpha, df1 = n.levels-1, df2 = n.try[i]-n.levels), df1 = n.levels-1, df2 = n.try[i]-n.levels, ncp = lambda.i, lower.tail = F)
+}
+n <- n.try[which(power >= desired.power)[1]]
+plot(n.try, power, xlab=expression(n[T]), ylab="Power", type="l")
+abline(v=n, col="red"); abline(h=desired.power, col="blue", lty=2)
+```
+
+#Electronics example
+```{r LoadData_electronics}
+Data <- data.frame(read.table(file = "Electronics.txt", header = T, sep = "\t", stringsAsFactors = F))
+Data$flux <- as.factor(Data$flux)
+```
+
+```{r FluxVSForce}
+fit.abt <- lm(force ~ flux, data=Data)
+plot(Data$flux, fit.abt$residuals, xlab="Flux", ylab="Residuals")
+
+car::leveneTest(y=Data$force, group=Data$flux)
+```
+Looks like variances might be different. Let's estimate them and re-fit model
+
+```{r FluxVSForce_weighted}
+var.groups <- sapply(as.character(unique(Data$flux)),function(i){ ind.i <- as.character(Data$flux)==i; sum( (Data$force[ind.i]-mean(Data$force[ind.i]))^2 )/(sum(ind.i)-1) })
+weight.groups <- rep(NA, nrow(Data))
+for (i in as.numeric(unique(Data$flux))) {weight.groups[as.character(Data$flux)==as.character(i)] <- 1/var.groups[i]}
+
+fit.abt.weighted <- lm(force ~ flux, data=Data, weights = weight.groups)
+```
+What changes about fit? Do estimates change? What about se's?
+
+#The cereal example
+```{r LoadData}
+Data <- data.frame(read.table(file = "Cereal.txt", header = T, sep = "\t", stringsAsFactors = F))
+Data$Design <- as.factor(Data$Design)
+Data$Store <- as.factor(Data$Store)
+```
+
+```{r FitCereal}
+fit.cereal <- lm(Sold ~ Design, data=Data)
+
+plot(Data$Design, fit.cereal$residuals, xlab="Design", ylab="Residuals")
+```
+
+```{r Cereal_Means}
+Diff.means <- function(object, v) {
+  
+  sigma2 <- summary(object)$sigma^2
+  Sigma <- sigma2 * summary(object)$cov.unscaled
+  return( list(beta.hat=sum(object$coefficients*v), se=sum(v*as.vector(Sigma%*%v))) )
+}
+
+#Design 2 - Design 1#
+Diff.means(object=fit.cereal, v=c(0,1,0,0))
+
+#Collectively 3+4 > 1+2?#
+Diff.means(object=fit.cereal, v=c(0,-1,1,1))
+```
+
+#Tukey for all pairwise comparisons
+```{r Allmeans}
+cereal.aov <- aov(Sold ~ Design, data = Data)
+TukeyHSD(x = cereal.aov)
+```

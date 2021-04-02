@@ -1,0 +1,134 @@
+---
+title: "Seedling"
+author: "Chris McKennan"
+date: "4/2/2020"
+output: html_document
+---
+
+Fitting random effects models in R
+
+#Load Data
+```{r LoadData}
+Data <- read.delim("http://www.public.iastate.edu/~dnett/S511/SeedlingDryWeight2.txt")
+head(Data)
+```
+Experiment: Seeds with 2 different genetic profiles were grown on 8 different trays. Each plant was grown for the same amount of time under (hopefully) similar conditions.
+Goal: Want to understand how seedling weight, in grams, depends on the genotype at a single locus.
+Genotype: Coded as A or B
+Tray: The tray on which each seedling was grown. There are 8 levels.
+Seedling: An ID for each seedling on each tray (these have no meaning)
+SeedlingWeight: The weight, in grams, of the resulting seedling.
+
+#Let's look at the data
+```{r PlotData}
+plot(Data[,2], Data[,4], xlab="Tray",ylab="Seedling Dry Weight", col=2*(1+(Data[,1]=="B")),pch=1,cex=2)
+legend("topright", c("Genotype A","Genotype B"), border=c(2,4), cex=0.75, pch=c(1,1), col=c("red","blue"))
+```
+What are some problems with this design?
+Can we treat tray as a fixed effect and still perform inference on genotype?
+If we treat Tray as a random effect, what is the model? What are the variance matrices $B_s$?
+
+Model:
+Let's try $y_{gti} = \mu + \beta_g + \delta_t + \epsilon_{gti}$
+$g$: index for genotype (A or B)
+$t$: index for tray ($1,\ldots,8$)
+$i$: replicate
+$\mu, \beta_g$ are fixed effects. Let's use trt constraint: $\beta_A=0$
+$\delta_t \stackrel{iid}{\sim} N(0,\sigma_{\delta}^2)$
+$\epsilon_{gti} \stackrel{iid}{\sim} N(0,\sigma^2)$
+
+Variance matrices:
+$B_1 = \text{diag}(1,\ldots,1)$
+$B_2$ is a partition matrix, where $B_{2_{rs}}=\begin{cases} 1 & \text{$r,s$ from same tray} \\0 & \text{otherwise} \end{cases}$
+$B_2 = \begin{pmatrix} 1_{n_1}1_{n_1}^T & &\\ & 1_{n_2}1_{n_2}^T &\\ & &\ddots\\ & && 1_{n_8}1_{n_8}^T \end{pmatrix}$
+
+#Let's try to understand B_2 and
+```{r Tray}
+Tray.info <- table(Data$Tray)
+names(Tray.info) <- paste0("Tray ", 1:8)
+Tray.info
+```
+What is the smallest eigenvalue of $B_2$? What is the maximum eigenvalue?
+If we were to fit this model ourself, what would be the smallest possible value for the ICC to ensure variance is a plausable variance matrix?
+
+#Fit the data using functions in R
+
+##nlme
+```{r nlme}
+library(nlme)   #Vignette is on blackboard
+
+#Fit with ML#
+out.lme.ml <- nlme::lme(SeedlingWeight ~ Genotype, random = ~1|Tray, method="ML", data=Data)
+out.lme.ml
+summary(out.lme.ml)  #Output logLik (this is straightforward). What are AIC and BIC here?? Let's go back to slides...
+
+#Fit with REML#
+out.lme.reml <- nlme::lme(SeedlingWeight ~ Genotype, random = ~1|Tray, method="REML", data=Data)
+out.lme.reml$coefficients  #The random effects have coefficients?? Let's go back to slides...
+out.lme.reml$varFix  #Estimated covariance of fixed effects
+
+coef.compare <- round(cbind(out.lme.ml$coefficients$fixed,out.lme.reml$coefficients$fixed),digits=2)
+rownames(coef.compare) <- c("Intercept", "Genotype"); colnames(coef.compare) <- c("ML", "REML")
+var.compare <- round(cbind(c(2.93^2,1.88^2),c(3.414856^2,1.88223^2)),digits=2)
+rownames(var.compare) <- c("Within-tray", "Sampling variance"); colnames(var.compare) <- c("ML", "REML")
+se.compare <- round(c(sqrt(out.lme.ml$varFix[2,2]),sqrt(out.lme.reml$varFix[2,2])),digits = 2); names(se.compare) <- c("ML", "REML")  #Std error
+
+var.compare   #Parameters in the variance model
+coef.compare  #Coefficients
+se.compare    #Standard error for coefficients
+
+#P-values#
+summary(out.lme.reml)$tTable
+```
+DF are computing using the method of Kenward and Roger (i.e. moment matching). Let's check the degrees of freedom
+
+##lme
+```{r lme4}
+library(lme4)
+out.lme4.reml <- lme4::lmer(SeedlingWeight ~ Genotype + (1|Tray), REML=T, data=Data)
+
+summary(out.lme4.reml)
+```
+Notice how lme4 does not ouput p-values, only t-statistics. This is because the authors feel they are too ad-hoc.
+Let's check their veracity in these data with simulation.
+
+###Parametric bootstrap to check degrees of freedom
+Here we will test the null hypothesis that the effect due to genotype is 0 using parametric bootstrap.
+Question: Can you think of another bootstrap procedure to test this null hypothesis in these data?
+```{r ParametricBootstrap}
+library( "MASS" ) #Functions for multivariate normals
+Z.tray <- model.matrix(~as.factor(Tray)-1, data=Data)
+X <- model.matrix(out.lme.reml, data=Data)
+Create.Sigma <- function(v1,v2,Z.tray) {
+  return( v1*diag(NROW(Z.tray)) + v2*Z.tray%*%t(Z.tray) )
+}
+
+#Simulate data under null hypothesis#
+#Question: Will distribution of esimated variance multipliers change under null hypothesis if we use REML?
+n.boot <- 1e3
+t.boot <- rep(NA,n.boot)
+t <- summary(out.lme.reml)$tTable[2,4]
+Sigma.model <- Create.Sigma(v=23.414856^2, v1=1.88223^2, Z.tray=Z.tray)
+coef.null <- c(out.lme.reml$coefficients$fixed[1],0)
+for (b in 1:n.boot) {
+  y.b <- MASS::mvrnorm(n = 1, mu = as.vector(X%*%coef.null), Sigma = Sigma.model)
+  data.b <- Data; data.b$SeedlingWeight <- y.b
+  t.boot[b] <- summary(nlme::lme(SeedlingWeight ~ Genotype, random = ~1|Tray, method="REML", data=data.b))$tTable[2,4]
+}
+
+#Normally distributed#
+qqplot(qnorm((1:n.boot)/(n.boot+1)), sort(t.boot), xlab="Theoretical quantiles", ylab="Bootstrap t statistics", main="Normal")
+qqline(y = sort(t.boot), col="red")
+
+#t-distributed, 20 df#
+qqplot(qt((1:n.boot)/(n.boot+1),df=20), sort(t.boot), xlab="Theoretical quantiles", ylab="Bootstrap t statistics", main="t_20")
+qqline(y = sort(t.boot), col="red")
+
+#t-distributed, 4 df#
+qqplot(qt((1:n.boot)/(n.boot+1),df=4), sort(t.boot), xlab="Theoretical quantiles", ylab="Bootstrap t statistics", main="t_4")
+qqline(y = sort(t.boot), col="red")
+
+#t-distributed, 6 df#
+qqplot(qt((1:n.boot)/(n.boot+1),df=6), sort(t.boot), xlab="Theoretical quantiles", ylab="Bootstrap t statistics", main="t_6: Same as K&R")
+qqline(y = sort(t.boot), col="red")
+```

@@ -1,0 +1,63 @@
+---
+title: "Non linear least squares"
+author: "Chris McKennan"
+date: "1/9/2020"
+output: html_document
+---
+Chlorine data
+#Import Data
+```{r LoadData}
+Chlorine <- data.frame(read.table(file = "/Users/Chris/Desktop/UniversityofPittsburgh/Teaching/STAT2132/DataSets/Chlorine.txt", header = T, sep = "\t"))
+Chlorine <- Chlorine[,-1]
+```
+
+#NLS
+
+##Good starting point
+```{r NLS_good}
+out.good_start <- nls(Chlorine ~ gamma0 + (0.49-gamma0)*exp(gamma2*(Week-8)), data = Chlorine, start = list(gamma0=0.2, gamma2=-0.1))
+gamma.hat <- out.good_start$m$getAllPars()
+
+plot(Chlorine$Week, Chlorine$Chlorine, xlab="Week", ylab="Chlorine")
+lines(Chlorine$Week, out.good_start$m$fitted(), col="red")
+
+##Check assumptions##
+###Constant variance###
+plot(out.good_start$m$fitted(), out.good_start$m$resid(), xlab="Fitted values", ylab="Residuals"); abline(h=0, col="red", lty=2)
+
+###Normality?####
+qqnorm(out.good_start$m$resid(), ylab="Residuals")
+qqline(out.good_start$m$resid(), col="red")  #How do the tails look?
+
+#Inference#
+J <- out.good_start$m$gradient()   #The 44 x 2 gradient matrix. This acts as our design matrix.
+sigma2 <- sum(out.good_start$m$resid()^2)/(nrow(J)-ncol(J))
+se.gamma0 <- sqrt(sigma2)*sqrt( solve(t(J)%*%J)[1,1] )
+se.gamma2 <- sqrt(sigma2)*sqrt( solve(t(J)%*%J)[2,2] )
+CI.gamma0 <- gamma.hat[1] + c(-1,1)*se.gamma0*qt(p = 0.975, df = nrow(J)-ncol(J))
+CI.gamma2 <- gamma.hat[2] + c(-1,1)*se.gamma2*qt(p = 0.975, df = nrow(J)-ncol(J))
+
+#Bootstrap#
+#I'll leave this up to you
+```
+
+##Bad starting point
+```{r NLS_bad}
+out.good_bad <- nls(Chlorine ~ gamma0 + (0.49-gamma0)*exp(gamma2*(Week-8)), data = Chlorine, start = list(gamma0=0.3, gamma2=2))
+```
+Gradient matrix is singular...
+
+##Internal starting point
+```{r NLS_Internal}
+out.internal <- nls(Chlorine ~ gamma0 + (0.49-gamma0)*exp(gamma2*(Week-8)), data = Chlorine)
+```
+A disaster...why?
+
+Cow data
+#Import data
+```{r ImportCowData}
+Cow <- data.frame(read.table(file = "/Users/Chris/Desktop/UniversityofPittsburgh/Teaching/STAT2132/DataSets/CowDilution.txt", header = T, sep = "\t"))
+plot(log(Cow$dilution)[Cow$month==0], Cow$density[Cow$month==0], xlab="Log(Dilution)", ylab="Density", main="May", ylim=c(0,2))
+plot(log(Cow$dilution)[Cow$month==1], Cow$density[Cow$month==1], xlab="Log(Dilution)", ylab="Density", main="June", ylim=c(0,2))
+```
+This is for you to play with.

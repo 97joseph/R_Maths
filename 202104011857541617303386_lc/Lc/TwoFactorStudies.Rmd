@@ -1,0 +1,51 @@
+---
+title: "2 factor models"
+author: "Chris McKennan"
+date: "3/5/2020"
+output: html_document
+---
+
+#Load data
+```{r LoadData}
+Data <- data.frame(read.table(file = "Bread.txt", sep="\t", header = T))
+Data$height <- factor(x = Data$height, levels = c(1,2,3), labels = c("high", "middle", "low"))
+Data$width <- factor(x = Data$width, levels = c(1,2), labels = c("regular", "wide"))
+```
+
+##Interaction model
+```{r InteractionModel}
+Int.model.trt <- lm(Cases ~ height*width, data=Data)
+
+options("contrasts")
+options(contrasts = c("contr.sum","contr.poly"))  #Should be either c("contr.treatment","contr.poly") OR c("contr.sum","contr.poly")
+
+Int.model.sum <- lm(Cases ~ height*width, data=Data)
+```
+
+##With aov
+```{r ANOVA}
+aov.cases <- aov(Cases ~ height*width, data = Data)
+summary(aov.cases)
+```
+What can we conclude about interaction? Will the conclusions depend on the type of constraint we are using (i.e. sum or treatment?)
+
+##Just additive model
+```{r Additive}
+options("contrasts")
+Add.model.sum <- lm(Cases ~ height + width, data=Data)
+
+#Tukey Pairwise for height#
+sum.Tukey <- TukeyHSD(x = aov(Cases ~ height + width, data = Data), which = c("height"))
+Delta.Tukey <- sum.Tukey$height[1,3]-sum.Tukey$height[1,2]
+
+#Scheffe confidence intervals#
+Delta.Scheffe <- SE(v = c(0,-1,1,0), object = Add.model.sum) * sqrt( (3-1)*qf(0.95,3-1,12-3-2+1) )
+```
+
+```{r SE}
+SE <- function(v, object) {
+  beta <- sum(v*object$coefficients)
+  Sigma <- summary(object)$sigma^2 * summary(object)$cov.unscaled
+  return( sum(v*(Sigma%*%v)) )
+}
+```

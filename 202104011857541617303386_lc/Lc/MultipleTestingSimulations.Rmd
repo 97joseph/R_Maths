@@ -1,0 +1,41 @@
+---
+title: "Multiple testing simulations"
+author: "Chris McKennan"
+date: "2/25/2020"
+output: html_document
+---
+
+Simulations to provide intuition as to why we care about multiple testing, and how it differs from standard testing.
+
+Here we will repeatedly test the null hypothesis $H_{0,j}: \mu_j = 0$ for $j=1,2,3$. The data use to test each null are independent. All data will be simulated as $Y_j \sim N(\mu_j 1_n,I_n)$ under the null hypothesis $\mu_1=\mu_2=\mu_3=0$, and will look at the frequency we falsely reject at least one of $H_{0,1}, H_{0,2}, H_{0,3}$.
+```{r MultipleTestingSimulations}
+n <- 100
+n.boot <- 500
+alpha <- 0.05
+Reject <- rep(NA, n.boot)  #Let's look at the number of false rejections
+for (i in 1:n.boot) {
+  Y1 <- rnorm(n); Y2 <- rnorm(n); Y3 <- rnorm(n)
+  t1 <- mean(Y1)/sd(Y1)*sqrt(n); t2 <- mean(Y2)/sd(Y1)*sqrt(n); t3 <- mean(Y3)/sd(Y3)*sqrt(n)
+  p1 <- 2*pt(-abs(t1),df=n-1); p2 <- 2*pt(-abs(t2),df=n-1); p3 <- 2*pt(-abs(t3),df=n-1)
+  Reject[i] <- as.numeric(p1 <= alpha || p2 <= alpha || p3 <= alpha)
+}
+
+mean(Reject)
+```
+
+
+Bonferroni correction
+```{r ApplyingBonferroni}
+n <- 100
+n.boot <- 500
+alpha <- 0.05
+Reject <- rep(NA, n.boot)  #Let's look at the number of false rejections
+for (i in 1:n.boot) {
+  Y1 <- rnorm(n); Y2 <- rnorm(n); Y3 <- rnorm(n)
+  t1 <- mean(Y1)/sd(Y1)*sqrt(n); t2 <- mean(Y2)/sd(Y1)*sqrt(n); t3 <- mean(Y3)/sd(Y3)*sqrt(n)
+  p1 <- 2*pt(-abs(t1),df=n-1); p2 <- 2*pt(-abs(t2),df=n-1); p3 <- 2*pt(-abs(t3),df=n-1)
+  Reject[i] <- as.numeric(p1 <= alpha/3 || p2 <= alpha/3 || p3 <= alpha/3)
+}
+
+mean(Reject)
+```

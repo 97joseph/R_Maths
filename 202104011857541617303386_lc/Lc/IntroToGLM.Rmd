@@ -1,0 +1,159 @@
+---
+title: "Intro to GLM"
+author: "Chris McKennan"
+date: "1/23/2020"
+output: html_document
+---
+
+This code provides an introduction to fitting logistic and Poisson (with log link) regression models. The relevant datasets are crab.txt, poissonreg.csv and Horse.txt.
+
+#Load data
+```{r LoadData}
+Data <- data.frame(read.table(file = "crab.txt", header = T, sep = "\t", stringsAsFactors = F))
+Data$Y <- as.numeric(Data$satell > 0)
+Data$weight <- Data$weight/1000
+Data$color <- Data$color-1
+Data$light <- as.numeric(Data$color < 4)
+```
+
+#GLM
+Logistic regression
+```{r Fit_GLM}
+fit.1 <- glm(Y ~ width, family = binomial(link = "logit"), data = Data)
+```
+
+#Coefficient estimates
+```{r Coefficients}
+#Coefficient estimates#
+beta.hat <- fit.1$coefficients
+
+#Odds ratio associated with 1cm increase in width#
+or.1cm <- exp(beta.hat[2])
+
+#Probability a female with width=21 has a male satellite#
+x.0 <- 21
+prob.21 <- exp(beta.hat[1] + beta.hat[2]*x.0)/(1 + exp(beta.hat[1] + beta.hat[2]*x.0))
+```
+
+#Standard errors based on asymptotic variance
+```{r SE}
+#Estimate for Fisher Information#
+FI <- summary(fit.1)$cov.scaled
+
+#Standard error for estimates#
+se <- sqrt(diag(FI))
+```
+
+#Wald hypothesis testing and CIs
+```{r Wald}
+#H_0: beta_width = 0 <=> H_0: OR = 1#
+t.H0 <- beta.hat[2]/se[2]
+pvalue.H0 <- 2*pnorm(-abs(t.H0))   #Very significant
+
+#95% CI for beta#
+alpha <- 0.05
+CI.beta <- beta.hat[2] + se[2]*c(qnorm(alpha/2), qnorm(1-alpha/2))
+
+#What about 95% CI for P(Y = 1 | X = 21)?#
+x <- c(1,21)  #Intercept and width
+se.x <- sum(x*(FI%*%x))
+CI.logit <- sum(x*beta.hat) + se.x*c(qnorm(alpha/2), qnorm(1-alpha/2))
+CI.prob <- exp(CI.logit)/(1+exp(CI.logit))
+```
+
+#Likelihood ratio test
+Test $H_0: \beta_{width}=0$
+```{r LRT}
+fit.0 <- glm(Y ~ 1, family = binomial(link = "logit"), data = Data)
+lr.stat <- fit.0$deviance - fit.1$deviance
+pvalue.H0.lr <- pchisq(q = lr.stat, df = 1, lower.tail = F)  #Also very significant, which is not surprising
+```
+
+#Pearson
+```{r CrabPearson}
+fit.pearson.0 <- glm(Y ~ color, family = binomial(link = "logit"), data = Data)
+
+Observed <- t(sapply(1:length(unique(Data$color)), function(i){ind.i <- Data$color==i; c(sum(Data$Y[ind.i]),sum(ind.i)-sum(Data$Y[ind.i]))}))
+rownames(Observed) <- c("1", "2", "3", "4"); colnames(Observed) <- c("Y=1", "Y=0")
+
+predicted <- exp(predict(fit.pearson.0))/(1+exp(predict(fit.pearson.0)))
+Expected <- t(sapply(1:length(unique(Data$color)), function(i){ind.i <- Data$color==i; c(sum(predicted[ind.i]),sum(ind.i)-sum(predicted[ind.i]))}))
+rownames(Expected) <- c("1", "2", "3", "4"); colnames(Expected) <- c("Y=1", "Y=0")
+
+Pearson.X2 <- sum((Observed-Expected)^2/Expected)
+pchisq(q = Pearson.X2, df = 4-2, lower.tail = F)
+```
+
+#Hosmer-Lemeshow
+```{r Hosmer-Lemeshow}
+library(ResourceSelection)
+fit.HL <- glm(Y ~ color, family = binomial(link = "logit"), data = Data)
+HL <- hoslem.test(fit.HL$y, fitted(fit.HL), g=10)
+```
+
+#Ordinal data
+```{r OrdinalData}
+Data$mates <- rep(0, nrow(Data))
+Data$mates[Data$satell>=1 & Data$satell<=5] <- 1
+Data$mates[Data$satell>5] <- 2
+Data$mates <- factor(Data$mates, levels = c(0,1,2), labels = c("0","1","2"), ordered = T)
+fit.ordinal <- MASS::polr(mates ~ weight + as.factor(color), data = Data)
+```
+Fitted model is $logit\left\lbrace \hat{P}(Y \leq 0 \mid Weight,Color=j)\right\rbrace = 1.59 + 1.22Weight + \hat{\beta}_j$ and $logit\left\lbrace \hat{P}(Y \leq 1 \mid Weight,Color=j)\right\rbrace = 3.95 + 1.22Weight + \hat{\beta}_j$. The fitted model indicates that heavier female crabs tend to have more mates.
+
+#Poisson regression with crab data
+```{r PoiCrab}
+fit.crab.pois <- glm(satell ~ weight + as.factor(color), family = poisson(link="log"), data = Data)
+mean.crab <- exp(predict(fit.crab.pois))
+Dispersion <- sum( (Data$satell-mean.crab)^2/mean.crab )/(nrow(Data)-ncol(model.matrix(fit.crab.pois)))
+
+#Data look over dispersed. Let's modify the dispersion parameter and see how inference changes
+summary(fit.crab.pois)$coefficients
+summary(fit.crab.pois, dispersion=Dispersion)$coefficients
+```
+
+
+#Let's switch to Poisson regression
+
+##The data
+- We have data from seniors from two high schools (159 from one school and 157 from the other).
+- We recorded the number of days they were absent during their junior year as well as their
+sex and their scores on standardized tests for math and language.
+- We want to create a model that will explain the missing of school.
+- Maybe do some prediction
+```{r LoadData}
+Data <- data.frame(read.csv(file = "poissonreg.csv", header = T, stringsAsFactors = F))
+```
+
+##Fit the model
+```{r FitModel}
+fit.poisson <- glm(daysabs ~ math + langarts + male, data=Data, family = poisson(link="log"))
+
+summary(fit.poisson)
+```
+Interpretation?
+
+###Get residuals
+```{r ModelDiagnostics}
+Pearson.resid <- residuals.glm(fit.poisson, type = "pearson")
+Deviance.resid <- residuals.glm(fit.poisson, type = "deviance")
+```
+
+##New rate data example
+- age in months
+- time in days
+```{r LoadData_horse}
+Data <- data.frame(read.table(file ="Horse.txt", header = T, stringsAsFactors = F, sep="\t"))
+```
+
+###Fit model
+```{r FitHorseModel}
+fit.horse <- glm(infec ~ age, family = poisson(link="log"), offset = log(time), data=Data)
+summary(fit.horse)
+```
+
+###Dispersion
+```{r Dispersion}
+Mean.fit <- exp(predict(fit.horse))
+Dispersion <- sum( (Data$infec - Mean.fit)^2/Mean.fit )/(nrow(Data) - 2)
+```
