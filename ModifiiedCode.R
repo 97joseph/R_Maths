@@ -30,6 +30,14 @@ frequency(SleepData)
 hist(SleepData$Hours)
 hist(SleepData$Treatment)
 hist(SleepData$Individual)
+# Kernel Density Plot
+ # returns the density data
+d1 <- densityPlot(SleepData$Hours)
+d3 <- densityPlot(SleepData$Individual)
+
+# plots the results
+plot(d1)
+plot(d3)
 
 #Distribution Fixes
 # Add a Normal Curve 
@@ -89,3 +97,8 @@ abline(lm(y ~ x, data = SleepData), col = "blue")
 #Enhanced Analysis
 scatterplot(Hours ~ Individual, data = SleepData)
 
+#REML MODEL
+library(sp)
+
+data(SleepData)
+fit.variogram.reml(log(zinc)~1, ~x+y, SleepData, model = vgm(1, "Sph", 900,1))
